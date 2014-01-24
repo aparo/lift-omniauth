@@ -4,7 +4,7 @@ import net.liftweb.util.Props
 import scala.xml.{XML, NodeSeq}
 import omniauth.{AuthInfo, Omniauth}
 import net.liftweb.http.S
-import dispatch.classic.:/
+import dispatch.:/
 import net.liftweb.util.Helpers._
 import scala.Some
 import net.liftweb.json.JsonParser
@@ -28,7 +28,6 @@ class LinkedinProvider(val clientId:String, val secret:String) extends OmniauthP
   implicit val formats = net.liftweb.json.DefaultFormats
 
   def doLinkedinSignin() : NodeSeq = {
-    var requestUrl = "https://www.linkedin.com/uas/oauth2/authorization?"
     val callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
     var urlParameters = Map[String, String]()
     urlParameters += ("client_id" -> clientId)
@@ -37,8 +36,8 @@ class LinkedinProvider(val clientId:String, val secret:String) extends OmniauthP
     urlParameters += ("response_type" -> "code")
     urlParameters += ("scope" -> linkedinPermissions)
     urlParameters += ("state" -> csrf)
-    requestUrl += Omniauth.q_str(urlParameters)
-    S.redirectTo(requestUrl)
+    var requestUrl = :/("www.linkedin.com").secure/"uas"/"oauth2"/"authorization"<<? urlParameters
+    S.redirectTo(requestUrl.url)
   }
 
   def doLinkedinCallback () : NodeSeq = {
@@ -54,7 +53,7 @@ class LinkedinProvider(val clientId:String, val secret:String) extends OmniauthP
 
       val tempRequest = (:/("www.linkedin.com").secure / "uas" / "oauth2" / "accessToken").POST << urlParameters
 
-      val json = Omniauth.http(tempRequest >-JsonParser.parse)
+      val json = Omniauth.json(tempRequest)
       val accessToken = tryo {
         AuthToken(
           (json \ "access_token").extract[String],
@@ -76,7 +75,7 @@ class LinkedinProvider(val clientId:String, val secret:String) extends OmniauthP
     val profile = "~:(id,first-name,last-name,email-address)"
     val tempRequest = :/("api.linkedin.com").secure / "v1" / "people" / profile <<? urlParameters
 
-    val json = Omniauth.http(tempRequest >- JsonParser.parse)
+    val json = Omniauth.json(tempRequest)
 
     val uid = (json \ "id").extract[String]
     val firstName = (json \ "firstName").extract[String]
@@ -97,7 +96,7 @@ class LinkedinProvider(val clientId:String, val secret:String) extends OmniauthP
       Map("access_token" -> accessToken.token)
 
     try{
-      val xml = Omniauth.http(tempRequest >- XML.loadString)
+      val xml = Omniauth.xml(tempRequest)
       Full((xml \ "id")text)
     } catch {
       case _ : Throwable => Empty

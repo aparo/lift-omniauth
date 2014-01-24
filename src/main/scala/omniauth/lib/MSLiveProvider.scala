@@ -1,7 +1,7 @@
 package omniauth.lib
 
 import omniauth.Omniauth
-import dispatch.classic._
+import dispatch._
 import xml.NodeSeq
 import net.liftweb.common.{Full, Empty, Box}
 import net.liftweb.json.JsonParser
@@ -23,7 +23,6 @@ class MSLiveProvider(val clientId:String, val secret:String) extends OmniauthPro
   implicit val formats = net.liftweb.json.DefaultFormats
 
   def doMSLiveSignin() : NodeSeq = {
-    var requestUrl = "https://login.live.com/oauth20_authorize.srf?"
     val callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
     var urlParameters = Map[String, String]()
     urlParameters += ("client_id" -> clientId)
@@ -31,8 +30,8 @@ class MSLiveProvider(val clientId:String, val secret:String) extends OmniauthPro
     urlParameters += ("scope" -> mslivePermissions)
     urlParameters += ("locale" -> S.locale.getLanguage)
     urlParameters += ("response_type" -> "code")
-    requestUrl += Omniauth.q_str(urlParameters)
-    S.redirectTo(requestUrl)
+    val requestUrl = :/("login.live.com")/"oauth20_authorize.srf" <<? urlParameters
+    S.redirectTo(requestUrl.url)
   }
 
   def doMSLiveCallback () : NodeSeq = {
@@ -47,7 +46,7 @@ class MSLiveProvider(val clientId:String, val secret:String) extends OmniauthPro
     val tempRequest = :/("login.live.com").secure / "oauth20_token.srf" <<? urlParameters
 
     val accessToken = try{
-      val json = Omniauth.http(tempRequest >- JsonParser.parse)
+      val json = Omniauth.json(tempRequest)
       json.extract[AuthToken]
     } catch {
       case _ : Throwable =>
@@ -65,7 +64,7 @@ class MSLiveProvider(val clientId:String, val secret:String) extends OmniauthPro
   def validateToken(accessToken:AuthToken): Boolean = {
     val tempRequest = :/("apis.live.net").secure / "v5.0/me" <<? Map("access_token" -> accessToken.token)
     try{
-      val json = Omniauth.http(tempRequest >- JsonParser.parse)
+      val json = Omniauth.json(tempRequest)
 
       val uid =  (json \ "id").extract[String]
       val name =  (json \ "name").extract[String]
@@ -86,7 +85,7 @@ class MSLiveProvider(val clientId:String, val secret:String) extends OmniauthPro
   def tokenToId(accessToken:AuthToken): Box[String] = {
     val tempRequest = :/("apis.live.net/v5.0/").secure / "me" <<? Map("access_token" -> accessToken.token)
     try{
-      val json = Omniauth.http(tempRequest >- JsonParser.parse)
+      val json = Omniauth.json(tempRequest)
       Full((json \ "id").extract[String])
     } catch {
       case _ : Throwable => Empty

@@ -8,7 +8,7 @@ import http.S
 import json.JsonParser
 
 
-import dispatch.classic._
+import dispatch._
 
 class DropboxProvider (val key:String, val secret:String) extends OmniauthProvider{
   implicit val formats = net.liftweb.json.DefaultFormats
@@ -17,14 +17,13 @@ class DropboxProvider (val key:String, val secret:String) extends OmniauthProvid
   def callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
   
   def signIn() = {
-    val baseReqUrl = "https://www.dropbox.com/1/oauth2/authorize?"
-    val params = Map(
+    val baseReqUrl = :/("www.dropbox.com") /"1"/"oauth2"/"authorize" <<? Map(
       "client_id" -> key,
       "response_type" -> "code",
       "redirect_uri" -> callbackUrl,
       "state" -> csrf
     )
-    S.redirectTo(baseReqUrl + Omniauth.q_str(params))
+    S.redirectTo(baseReqUrl.url)
   }
   
   def callback() = {
@@ -39,7 +38,7 @@ class DropboxProvider (val key:String, val secret:String) extends OmniauthProvid
             "client_secret" -> secret
           )
           
-          val json = Omniauth.http(req >- JsonParser.parse)
+          val json = Omniauth.json(req)
           val token = AuthToken(
               (json \ "access_token").extract[String],
               None,
@@ -94,7 +93,7 @@ class DropboxProvider (val key:String, val secret:String) extends OmniauthProvid
       "locale" -> S.locale.getLanguage()) <:< Map(
       "Authorization" -> ("Bearer "+accessToken.token))
 
-    val res = Omniauth.http(req >- JsonParser.parse)
+    val res = Omniauth.json(req)
     val name = (res \ "display_name").extract[String]
     val uid = (res \ "uid").extract[String]
     

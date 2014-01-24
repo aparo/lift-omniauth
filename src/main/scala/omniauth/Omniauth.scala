@@ -17,19 +17,26 @@ package omniauth
  */
 
 import omniauth.lib._
-import dispatch.classic._
-import oauth._
+import dispatch._
 import net.liftweb.http._
 import net.liftweb.sitemap.{Menu, Loc}
 import Loc._
 import net.liftweb.util.Props
 import net.liftweb.common._
-import org.apache.http.client.utils.URLEncodedUtils
-import org.apache.http.message.BasicNameValuePair
+import scala.concurrent.{ExecutionContext, Await}
+import scala.xml.XML
+import org.scribe.model.Token
+
+//import org.apache.http.client.utils.URLEncodedUtils
+//import org.apache.http.message.BasicNameValuePair
+import net.liftweb.json.JsonAST._
+import net.liftweb.json._
+import scala.concurrent.duration._
 
 object Omniauth extends Omniauth
 
 trait Omniauth  {
+  import ExecutionContext.Implicits.global
   val logger = Logger("omniauth.Omniauth")
 
  /**
@@ -166,10 +173,27 @@ trait Omniauth  {
     Empty
   }
 
-  def map2ee(values: Map[String, Any]) = java.util.Arrays asList (
-    values.toSeq map { case (k, v) => new BasicNameValuePair(k, v.toString) } toArray : _*
-  )
-  def q_str (values: Map[String, Any]) = URLEncodedUtils.format(map2ee(values), Request.factoryCharset)
+  def json(request:dispatch.Req):JValue = {
+    //this.asString(request) onSuccess { case s:String=>return parse(s)}
+    val res = Await.result(asString(request), 30.seconds)
+    parse(res)
+  }
+
+  def xml(request:dispatch.Req) = {
+    //this.asString(request) onSuccess { case s:String=>return parse(s)}
+    val res = Await.result(asString(request), 30.seconds)
+    XML.loadString(res)
+  }
+
+  def asString(request:dispatch.Req):Future[String]={
+
+    Http(request OK as.String)
+  }
+
+//  def map2ee(values: Map[String, Any]) = java.util.Arrays asList (
+//    values.toSeq map { case (k, v) => new BasicNameValuePair(k, v.toString) } toArray : _*
+//  )
+//  def q_str (values: Map[String, Any]) = URLEncodedUtils.format(map2ee(values), Request.factoryCharset)
 }
 
 case class AuthInfo(provider:String,

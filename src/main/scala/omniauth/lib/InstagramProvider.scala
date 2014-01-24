@@ -4,7 +4,7 @@ import net.liftweb.util.Props
 import scala.xml.NodeSeq
 import omniauth.{AuthInfo, Omniauth}
 import net.liftweb.http.S
-import dispatch.classic.:/
+import dispatch.:/
 import net.liftweb.json.JsonParser
 import net.liftweb.common.{Empty, Full, Box}
 import net.liftweb.util.Helpers._
@@ -22,7 +22,6 @@ class InstagramProvider(val clientId:String, val secret:String) extends Omniauth
   implicit val formats = net.liftweb.json.DefaultFormats
 
   def doInstagramSignin() : NodeSeq = {
-    var requestUrl = "https://api.instagram.com/oauth/authorize?"
     val callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
     var urlParameters = Map[String, String]()
     urlParameters += ("client_id" -> clientId)
@@ -30,8 +29,8 @@ class InstagramProvider(val clientId:String, val secret:String) extends Omniauth
     urlParameters += ("scope" -> instagramPermissions)
     urlParameters += ("response_type" -> "code")
     urlParameters += ("scope" -> instagramPermissions)
-    requestUrl += Omniauth.q_str(urlParameters)
-    S.redirectTo(requestUrl)
+    val requestUrl = :/("api.instagram.com").secure/"oauth"/"authorize" <<? urlParameters
+    S.redirectTo(requestUrl.url)
   }
 
   def doInstagramCallback () : NodeSeq = {
@@ -47,7 +46,7 @@ class InstagramProvider(val clientId:String, val secret:String) extends Omniauth
     val tempRequest = (:/("api.instagram.com").secure / "oauth" / "access_token").POST <:<
       Map("Content-Type" -> "application/x-www-form-urlencoded")<< urlParameters
 
-    val json = Omniauth.http(tempRequest >-JsonParser.parse)
+    val json = Omniauth.json(tempRequest)
     val accessToken = tryo {
       AuthToken(
         (json \ "access_token").extract[String],
@@ -77,7 +76,7 @@ class InstagramProvider(val clientId:String, val secret:String) extends Omniauth
     val tempRequest = :/("api.instagram.com").secure / "v1" / "users" / "self" / "feed" <<? Map("access_token" -> accessToken.token)
 
     try{
-      Omniauth.http(tempRequest >- JsonParser.parse)
+      Omniauth.json(tempRequest)
       true
     } catch {
       case _ : Throwable => false

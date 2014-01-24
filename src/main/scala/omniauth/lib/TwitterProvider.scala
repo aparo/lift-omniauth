@@ -16,16 +16,25 @@
 
 package omniauth.lib
 import omniauth.Omniauth
-import dispatch.classic._
-import oauth._
-import oauth.OAuth._
-import twitter.Auth
+import dispatch._
 import xml.NodeSeq
-import net.liftweb.json.JsonParser
 import net.liftweb.http._
 import net.liftweb.common._
 import omniauth.AuthInfo
 import net.liftweb.util.Helpers._
+import org.scribe.builder.ServiceBuilder
+import org.scribe.builder.api.TwitterApi
+import org.scribe.model._
+import net.liftweb.json._
+import org.scribe.model.Token
+
+case class TwitterPerson(name: String, id: Int, screen_name:String){
+
+}
+case class TwitterFriends(users: List[TwitterPerson])
+
+object accessTokenSess extends SessionVar[Box[Token]](Empty)
+object twitterSession extends SessionVar[Box[TwitterPerson]](Empty)
 
 class TwitterProvider(val key:String, val secret:String) extends OmniauthProvider {
   def providerName = TwitterProvider.providerName
@@ -35,18 +44,23 @@ class TwitterProvider(val key:String, val secret:String) extends OmniauthProvide
   def signIn(): NodeSeq = doTwitterSignin
   def callback(): NodeSeq = doTwitterCallback
   implicit val formats = net.liftweb.json.DefaultFormats
+  lazy val callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
 
-  val consumer = Consumer(key, secret)
+  val consumer = new ServiceBuilder().provider(classOf[TwitterApi])
+    .apiKey(key)
+    .apiSecret(secret)
+    .callback(callbackUrl)
+    .build()
 
-  def twitterAuthenticateUrl(token: Token) = Omniauth.twitterOauthRequest / "authenticate" with_token token
+
+  //def twitterAuthenticateUrl(token: Token) = Omniauth.twitterOauthRequest / "authenticate" with_token token
 
   def doTwitterSignin () : NodeSeq = {
     logger.debug("doTwitterSignin")
     logger.debug(consumer)
-    var callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
     logger.debug(callbackUrl)
-    var requestToken = Omniauth.http(Auth.request_token(consumer, callbackUrl))
-    val auth_uri = twitterAuthenticateUrl(requestToken).to_uri
+    val requestToken = consumer.getRequestToken
+    val auth_uri = consumer.getAuthorizationUrl(requestToken)
     logger.debug(auth_uri.toString)
     Omniauth.setRequestToken(requestToken)
     S.redirectTo(auth_uri.toString)
@@ -54,45 +68,25 @@ class TwitterProvider(val key:String, val secret:String) extends OmniauthProvide
 
   def doTwitterCallback () : NodeSeq = {
     logger.debug("doTwitterCallback")
-    val verifier = S.param("oauth_verifier") openOr S.redirectTo(Omniauth.failureRedirect)
-    var requestToken = Omniauth.currentRequestToken openOr S.redirectTo(Omniauth.failureRedirect)
-    Omniauth.http(Auth.access_token(consumer, requestToken, verifier)) match {
-      case (access_tok, tempUid, screen_name) => {
-        val accessToken = AuthToken(access_tok.value, None, None, emptyForBlank(access_tok.secret))
-        if(validateToken(accessToken)){
-          S.redirectTo(Omniauth.successRedirect)
-        }else{
-          S.redirectTo(Omniauth.failureRedirect)
-        }
-      }
-      case _ => S.redirectTo(Omniauth.failureRedirect)
-    }
-  }
+    for {
+      oAuthVerifier <- S.param("oauth_verifier")
+      requestToken <- Omniauth.currentRequestToken
+    } yield {
+      val verifier = new Verifier(oAuthVerifier)
+      val accessToken = consumer.getAccessToken(requestToken, verifier)
 
-  def validateToken(accessToken:AuthToken): Boolean = {
-    val tokenParts = accessToken.token
-    if(accessToken.secret.isEmpty){
-      logger.debug("tokenParts.length != 2: "+accessToken.token +",")
-      return false
-    }
-    val authToken = Token(accessToken.token, accessToken.secret.get)
-    logger.debug("authToken "+authToken)
-    val verifyCreds = Omniauth.TwitterHost / "1.1/account/verify_credentials.json" <@ (consumer, authToken)
-    try{
-      val json = Omniauth.http(verifyCreds >- JsonParser.parse)
+      val person = fetchTwitterPerson(requestToken, accessToken)
 
-      val uid = (json \ "id").extract[String]
-      val name = (json \ "name").extract[String]
-      val nickName = (json \ "screen_name").extract[String]
+      twitterSession(Full(person))
 
-
-      val ai = AuthInfo(providerName,uid,name,accessToken,Some(authToken.secret),Some(nickName))
+      accessTokenSess(Full(accessToken))
+      val authToken = AuthToken(accessToken.getToken, None, None, emptyForBlank(accessToken.getSecret))
+      val ai = AuthInfo(providerName,person.id.toString,person.name,authToken,Some(accessToken.getSecret),Some(person.screen_name))
       Omniauth.setAuthInfo(ai)
       logger.debug(ai)
-      true
-    } catch {
-      case e:Exception => logger.debug("Exception= "+e);false;
+      return S.redirectTo(Omniauth.successRedirect)
     }
+   S.redirectTo(Omniauth.failureRedirect)
   }
 
   def tokenToId(accessToken:AuthToken): Box[String] = {
@@ -101,15 +95,59 @@ class TwitterProvider(val key:String, val secret:String) extends OmniauthProvide
       logger.debug("tokenParts.length != 2: "+accessToken)
       return Empty
     }
-    val authToken = Token(tokenParts(0), tokenParts(1))
-    logger.debug("authToken "+authToken)
-    val verifyCreds = Omniauth.TwitterHost / "1.1/account/verify_credentials.json" <@ (consumer, authToken)
+//    val authToken = Token(tokenParts(0), tokenParts(1))
+//    logger.debug("authToken "+authToken)
+//    val verifyCreds = Omniauth.TwitterHost / "1.1/account/verify_credentials.json" <@ (consumer, authToken)
     try{
-      val json = Omniauth.http(verifyCreds >- JsonParser.parse)
-      (json \ "id").extractOpt[String]
+      val requestToken = Omniauth.currentRequestToken
+      val person = fetchTwitterPerson(requestToken.get, new Token(accessToken.token,accessToken.secret.get))
+      Full(person.id.toString)
     }catch {
-      case e:Exception => logger.debug("Exception= "+e);Empty;
+      case e:Exception =>
+        logger.debug("Exception= "+e)
+        Empty
     }
+  }
+
+  def fetchTwitterPerson(requestToken: Token, accessToken: Token):TwitterPerson = {
+    val request = new OAuthRequest(
+      Verb.GET,
+      "http://api.twitter.com/1.1/account/verify_credentials.json?skip_status=true"
+    )
+
+    consumer.signRequest(accessToken, request)
+
+    parse(request.send().getBody).extract[TwitterPerson]
+  }
+
+  def fetchUserFriends = {
+    val request = new OAuthRequest(
+      Verb.GET,
+      "http://api.twitter.com/1.1/friends/list.json?skip_status=true"
+    )
+
+    val friends = for {
+      token <- accessTokenSess
+    } yield {
+      consumer.signRequest(token, request)
+
+      parse(request.send().getBody).extract[TwitterFriends].users
+    }
+
+    friends.openOr(Nil)
+  }
+
+  def validateToken(token: AuthToken): Boolean = {
+    try{
+      val requestToken = Omniauth.currentRequestToken
+      fetchTwitterPerson(requestToken.get, new Token(token.token,token.secret.get))
+      true
+    }catch {
+      case e:Exception =>
+        logger.debug("Exception= "+e)
+        false
+    }
+
   }
 }
 

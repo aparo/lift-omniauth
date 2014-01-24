@@ -15,8 +15,9 @@
  */
 
 package omniauth.lib
+
 import omniauth.Omniauth
-import dispatch.classic._
+import dispatch._
 import xml.NodeSeq
 import net.liftweb.common.{Full, Empty, Box}
 import net.liftweb.json.JsonParser
@@ -25,75 +26,93 @@ import net.liftweb.util.Props
 import omniauth.AuthInfo
 
 
-class FacebookProvider(val clientId:String, val secret:String) extends OmniauthProvider{
+class FacebookProvider(val clientId: String, val secret: String) extends OmniauthProvider {
+
+  import scala.concurrent.ExecutionContext.Implicits.global
+
   def providerName = FacebookProvider.providerName
+
   def providerPropertyKey = FacebookProvider.providerPropertyKey
+
   def providerPropertySecret = FacebookProvider.providerPropertySecret
 
-  def facebookPermissions = 
+  def facebookPermissions =
     Props.get("omniauth.facebookpermissions") openOr ""
 
-  def signIn():NodeSeq = doFacebookSignin
+  def signIn(): NodeSeq = doFacebookSignin
+
   def callback(): NodeSeq = doFacebookCallback
+
   implicit val formats = net.liftweb.json.DefaultFormats
 
-  def doFacebookSignin() : NodeSeq = {
-    var requestUrl = "https://graph.facebook.com/oauth/authorize?"
-    val callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
-    var urlParameters = Map[String, String]()
-    urlParameters += ("client_id" -> clientId)
-    urlParameters += ("redirect_uri" -> callbackUrl)
-    urlParameters += ("scope" -> facebookPermissions)
-    requestUrl += Omniauth.q_str(urlParameters)
-    S.redirectTo(requestUrl)
+  def doFacebookSignin(): NodeSeq = {
+    val callbackUrl = Omniauth.siteAuthBaseUrl + "auth/" + providerName + "/callback"
+    val requestUrl = :/("www.facebook.com").secure / "dialog" / "oauth" <<?
+      ("client_id", clientId) ::
+        ("redirect_uri", callbackUrl) ::
+        Nil
+    S.redirectTo(requestUrl.url)
   }
 
-  def doFacebookCallback () : NodeSeq = {
+  def doFacebookCallback(): NodeSeq = {
     val fbCode = S.param("code") openOr S.redirectTo("/")
-    val callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
-    var urlParameters = Map[String, String]()
-    urlParameters += ("client_id" -> clientId)
-    urlParameters += ("redirect_uri" -> callbackUrl)
-    urlParameters += ("client_secret" -> secret)
-    urlParameters += ("code" -> fbCode.toString)
-    val tempRequest = :/("graph.facebook.com").secure / "oauth/access_token" <<? urlParameters
-    val accessToken = extractToken(Omniauth.http(tempRequest as_str))
+    val callbackUrl = Omniauth.siteAuthBaseUrl + "auth/" + providerName + "/callback"
 
-    if(validateToken(accessToken)){
-      S.redirectTo(Omniauth.successRedirect)
-    }else{
-      S.redirectTo(Omniauth.failureRedirect)
+
+    S.param("code") match {
+      case Full(c) =>
+        val reqHandler = :/("graph.facebook.com").secure / "oauth" / "access_token" <<?
+          ("client_id", clientId) ::
+            ("redirect_uri", callbackUrl) ::
+            ("client_secret", secret) ::
+            ("code", fbCode.toString) :: Nil
+
+        val resp = Omniauth.asString(reqHandler)
+
+        //        val accessToken = resp map extractToken
+        for (accessToken <- resp map extractToken) {
+          if (validateToken(accessToken)) {
+            S.redirectTo(Omniauth.successRedirect)
+          } else {
+            S.redirectTo(Omniauth.failureRedirect)
+          }
+        }
+        S.redirectTo(Omniauth.failureRedirect)
+
+      case _ => logger.warn("no code parameter in the URL")
+        S.redirectTo(Omniauth.failureRedirect)
     }
+
+
   }
 
-  def validateToken(accessToken:AuthToken): Boolean = {
+  def validateToken(accessToken: AuthToken): Boolean = {
     val tempRequest = :/("graph.facebook.com").secure / "me" <<? Map("access_token" -> accessToken.token)
-    try{
-      val json = Omniauth.http(tempRequest >- JsonParser.parse)
-
-      val uid =  (json \ "id").extract[String]
-      val name =  (json \ "name").extract[String]
+    try {
+      val json = Omniauth.json(tempRequest)
+      val uid = (json \ "id").extract[String]
+      val name = (json \ "name").extract[String]
       val firstName = (json \ "first_name").extract[String]
       val lastName = (json \ "last_name").extract[String]
       val email = (json \ "email").extract[String]
-      val ai = AuthInfo(providerName,uid,name,accessToken,Some(secret),
+      val ai = AuthInfo(providerName, uid, name, accessToken, Some(secret),
         Some(name), Some(email), Some(firstName), Some(lastName))
       Omniauth.setAuthInfo(ai)
       logger.debug(ai)
 
       true
     } catch {
-      case _ : Throwable => false
+      case _: Throwable => false
     }
   }
 
-  def tokenToId(accessToken:AuthToken): Box[String] = {
+  def tokenToId(accessToken: AuthToken): Box[String] = {
     val tempRequest = :/("graph.facebook.com").secure / "me" <<? Map("access_token" -> accessToken.token)
-    try{
-      val json = Omniauth.http(tempRequest >- JsonParser.parse)
+    try {
+      val json = Omniauth.json(tempRequest)
       Full((json \ "id").extract[String])
     } catch {
-      case _ : Throwable => Empty
+      case _: Throwable => Empty
     }
   }
 

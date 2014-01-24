@@ -16,15 +16,16 @@ crossScalaVersions := Seq("2.10.3", "2.9.2", "2.9.1-1", "2.9.1")
 
 resolvers += "CB Central Mirror" at "http://repo.cloudbees.com/content/groups/public"
 
+resolvers += "Sonatype releases" at "http://oss.sonatype.org/content/repositories/releases/"
+
 resolvers += "Sonatype snapshots" at "http://oss.sonatype.org/content/repositories/snapshots/"
 
 libraryDependencies <++= liftVersion { v =>
   Seq("net.liftweb"   %% "lift-webkit"  % v  % "provided",
-      "net.databinder" %% "dispatch-core" % "0.8.9",
-      "net.databinder" %% "dispatch-http" % "0.8.9",
-      "net.databinder" %% "dispatch-oauth" % "0.8.9",
-      "net.databinder" %% "dispatch-http-json" % "0.8.9"
-    )
+      "net.databinder.dispatch" %% "dispatch-core" % "0.11.0",
+      "net.databinder.dispatch" %% "dispatch-lift-json" % "0.11.0",
+      "org.scribe" % "scribe" % "1.3.5" % "compile"
+  )
 }
 
 //scalacOptions ++= Seq("-feature")

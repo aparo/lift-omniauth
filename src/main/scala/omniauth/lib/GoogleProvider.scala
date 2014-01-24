@@ -4,7 +4,7 @@ import net.liftweb.util.Props
 import scala.xml.NodeSeq
 import omniauth.{AuthInfo, Omniauth}
 import net.liftweb.http.S
-import dispatch.classic.:/
+import dispatch.:/
 import net.liftweb.json.JsonParser
 import net.liftweb.common.{Empty, Full, Box}
 import net.liftweb.util.Helpers._
@@ -27,17 +27,15 @@ class GoogleProvider(val clientId:String, val secret:String) extends OmniauthPro
   implicit val formats = net.liftweb.json.DefaultFormats
 
   def doGoogleSignin() : NodeSeq = {
-    var requestUrl = "https://accounts.google.com/o/oauth2/auth?"
     val callbackUrl = Omniauth.siteAuthBaseUrl+"auth/"+providerName+"/callback"
-    var urlParameters = Map[String, String]()
-    urlParameters += ("client_id" -> clientId)
-    urlParameters += ("redirect_uri" -> callbackUrl)
-    urlParameters += ("access_type" -> googleAccessType)
-    urlParameters += ("scope" -> googlePermissions)
-    urlParameters += ("response_type" -> "code")
-    urlParameters += ("scope" -> googlePermissions)
-    requestUrl += Omniauth.q_str(urlParameters)
-    S.redirectTo(requestUrl)
+    val requestUrl = :/("accounts.google.com").secure /"o"/"oauth2"/"auth" <<? Map(
+      "client_id" -> clientId,
+      "redirect_uri" -> callbackUrl,
+      "access_type" -> googleAccessType,
+      "scope" -> googlePermissions,
+      "response_type" -> "code",
+    "scope" -> googlePermissions)
+    S.redirectTo(requestUrl.url)
   }
 
   def doGoogleCallback () : NodeSeq = {
@@ -54,7 +52,7 @@ class GoogleProvider(val clientId:String, val secret:String) extends OmniauthPro
       val tempRequest = (:/("accounts.google.com").secure / "o" / "oauth2" / "token").POST <:<
         Map("Content-Type" -> "application/x-www-form-urlencoded")<< urlParameters
 
-      val json = Omniauth.http(tempRequest >-JsonParser.parse)
+      val json = Omniauth.json(tempRequest)
       val accessToken = tryo {
         AuthToken(
           (json \ "access_token").extract[String],
@@ -76,7 +74,7 @@ class GoogleProvider(val clientId:String, val secret:String) extends OmniauthPro
       Map("access_token" -> accessToken.token)
 
     try{
-      val json = Omniauth.http(tempRequest >- JsonParser.parse)
+      val json = Omniauth.json(tempRequest)
 
       val uid =  (json \ "id").extract[String]
       val name =  (json \ "name").extract[String]
@@ -99,7 +97,7 @@ class GoogleProvider(val clientId:String, val secret:String) extends OmniauthPro
       Map("access_token" -> accessToken.token)
 
     try{
-      val json = Omniauth.http(tempRequest >- JsonParser.parse)
+      val json = Omniauth.json(tempRequest)
       Full((json \ "id").extract[String])
     } catch {
       case _ : Throwable => Empty
